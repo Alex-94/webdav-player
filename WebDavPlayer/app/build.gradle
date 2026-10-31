@@ -32,5 +32,6 @@ android {
 }
 
 dependencies {
-    // 零第三方依赖：WebDAV 用 HttpURLConnection，解析用 XmlPullParser，均为系统自带
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
 }
+
