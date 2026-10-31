@@ -8,6 +8,9 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.xmlpull.v1.XmlPullParser
 import java.net.URLDecoder
+import java.text.SimpleDateFormat
+import java.util.Locale
+import java.util.TimeZone
 import java.util.concurrent.TimeUnit
 
 object WebDavClient {
@@ -16,7 +19,8 @@ object WebDavClient {
         val name: String,
         val rawHref: String,
         val isDir: Boolean,
-        val size: Long
+        val size: Long,
+        val lastMod: Long
     )
 
     private val client = OkHttpClient.Builder()
@@ -27,7 +31,7 @@ object WebDavClient {
     private const val PROPFIND_BODY =
         "<?xml version=\"1.0\" encoding=\"utf-8\"?>" +
             "<d:propfind xmlns:d=\"DAV:\"><d:prop>" +
-            "<d:displayname/><d:resourcetype/><d:getcontentlength/>" +
+            "<d:displayname/><d:resourcetype/><d:getcontentlength/><d:getlastmodified/>" +
             "</d:prop></d:propfind>"
 
     fun list(url: String, user: String, pass: String): List<Entry> {
@@ -56,16 +60,21 @@ object WebDavClient {
         var display: String? = null
         var isDir = false
         var size = 0L
+        var lastMod = 0L
         var event = p.eventType
         while (event != XmlPullParser.END_DOCUMENT) {
             when (event) {
                 XmlPullParser.START_TAG -> {
                     when (localName(p.name)) {
-                        "response" -> { href = null; display = null; isDir = false; size = 0L }
+                        "response" -> {
+                            href = null; display = null
+                            isDir = false; size = 0L; lastMod = 0L
+                        }
                         "href" -> href = p.nextText()
                         "displayname" -> display = p.nextText()
                         "collection" -> isDir = true
                         "getcontentlength" -> size = p.nextText().toLongOrNull() ?: 0L
+                        "getlastmodified" -> lastMod = parseDate(p.nextText())
                     }
                 }
                 XmlPullParser.END_TAG -> {
@@ -75,7 +84,7 @@ object WebDavClient {
                             val dec = URLDecoder.decode(h.trimEnd('/'), "UTF-8")
                             val seg = dec.substringAfterLast('/')
                             val name = display?.takeIf { it.isNotBlank() } ?: seg
-                            out.add(Entry(name, h, isDir, size))
+                            out.add(Entry(name, h, isDir, size, lastMod))
                         }
                     }
                 }
@@ -83,6 +92,29 @@ object WebDavClient {
             event = p.next()
         }
         return out
+    }
+
+    private fun parseDate(raw: String): Long {
+        val s = raw.trim()
+        val patterns = listOf(
+            "EEE, dd MMM yyyy HH:mm:ss zzz",      // RFC 1123: Sat, 31 Oct 2026 10:00:00 GMT
+            "EEEE, dd-MMM-yy HH:mm:ss zzz",       // RFC 850
+            "EEE MMM d HH:mm:ss yyyy",            // asctime
+            "yyyy-MM-dd'T'HH:mm:ss'Z'",
+            "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+            "yyyy-MM-dd HH:mm:ss"
+        )
+        for (pat in patterns) {
+            try {
+                val f = SimpleDateFormat(pat, Locale.US)
+                f.timeZone = TimeZone.getTimeZone("GMT")
+                f.isLenient = true
+                val d = f.parse(s)
+                if (d != null) return d.time
+            } catch (_: Exception) {
+            }
+        }
+        return 0L
     }
 
     private fun localName(raw: String): String =
