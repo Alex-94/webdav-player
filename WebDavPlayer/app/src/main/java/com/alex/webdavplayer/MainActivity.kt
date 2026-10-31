@@ -49,7 +49,8 @@ class MainActivity : Activity() {
 
         adapter = MyAdapter()
         listView.adapter = adapter
-        listView.onItemClickListener = { _, _, pos, _ -> onItem(entries[pos]) }
+        listView.onItemClickListener = android.widget.AdapterView.OnItemClickListener { _, _, pos, _ -> onItem(entries[pos]) }
+
 
         currentPath = prefs.getString("lastPath", "/") ?: "/"
         load(currentPath)
