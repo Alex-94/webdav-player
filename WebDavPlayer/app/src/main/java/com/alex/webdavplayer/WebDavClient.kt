@@ -1,11 +1,14 @@
 package com.alex.webdavplayer
 
 import android.util.Xml
+import okhttp3.Credentials
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.xmlpull.v1.XmlPullParser
-import java.net.HttpURLConnection
-import java.net.URL
 import java.net.URLDecoder
-import java.util.Base64
+import java.util.concurrent.TimeUnit
 
 object WebDavClient {
 
@@ -16,23 +19,33 @@ object WebDavClient {
         val size: Long
     )
 
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(8, TimeUnit.SECONDS)
+        .readTimeout(20, TimeUnit.SECONDS)
+        .build()
+
+    private const val PROPFIND_BODY =
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>" +
+            "<d:propfind xmlns:d=\"DAV:\"><d:prop>" +
+            "<d:displayname/><d:resourcetype/><d:getcontentlength/>" +
+            "</d:prop></d:propfind>"
+
     fun list(url: String, user: String, pass: String): List<Entry> {
-        val conn = URL(url).openConnection() as HttpURLConnection
-        conn.requestMethod = "PROPFIND"
-        conn.connectTimeout = 8000
-        conn.readTimeout = 20000
-        conn.setRequestProperty("Depth", "1")
+        val body = PROPFIND_BODY.toRequestBody("application/xml".toMediaType())
+        val builder = Request.Builder()
+            .url(url)
+            .method("PROPFIND", body)
+            .header("Depth", "1")
         if (user.isNotBlank()) {
-            val token = Base64.getEncoder()
-                .encodeToString("$user:$pass".toByteArray(Charsets.UTF_8))
-            conn.setRequestProperty("Authorization", "Basic $token")
+            builder.header("Authorization", Credentials.basic(user, pass))
         }
-        val code = conn.responseCode
-        if (code != 207 && code != 200) {
-            throw RuntimeException("HTTP $code")
+        client.newCall(builder.build()).execute().use { resp ->
+            if (resp.code != 207 && resp.code != 200) {
+                throw RuntimeException("HTTP ${resp.code}")
+            }
+            val text = resp.body?.string() ?: ""
+            return parse(text)
         }
-        val body = conn.inputStream.readBytes().toString(Charsets.UTF_8)
-        return parse(body)
     }
 
     private fun parse(xml: String): List<Entry> {
